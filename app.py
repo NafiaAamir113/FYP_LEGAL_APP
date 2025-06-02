@@ -4,7 +4,7 @@ import pinecone
 from transformers import AutoTokenizer, AutoModel
 import torch
 import datetime
-from sentence_transformers import CrossEncoder
+from sklearn.metrics.pairwise import cosine_similarity
 
 # Streamlit page setup
 st.set_page_config(page_title="LEGAL ASSISTANT", layout="wide")
@@ -39,9 +39,6 @@ def get_embedding(text):
     normalized = torch.nn.functional.normalize(embeddings, p=2, dim=1)
     return normalized[0].cpu().numpy().tolist()
 
-# Load reranker model
-reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
-
 # Page Title
 st.title("⚖️ LEGAL ASSISTANT")
 
@@ -65,7 +62,7 @@ if st.button("Generate Answer"):
         query_embedding = get_embedding(query)
 
         try:
-            search_results = index.query(vector=query_embedding, top_k=5, include_metadata=True)
+            search_results = index.query(vector=query_embedding, top_k=10, include_metadata=True)
         except Exception as e:
             st.error(f"Pinecone query failed: {e}")
             st.stop()
@@ -74,14 +71,21 @@ if st.button("Generate Answer"):
             st.warning("No relevant results found. Try rephrasing your query.")
             st.stop()
 
-        # Extract and rerank results
+        # Extract context chunks
         context_chunks = [match["metadata"]["text"] for match in search_results["matches"]]
-        rerank_scores = reranker.predict([(query, chunk) for chunk in context_chunks])
-        ranked_results = sorted(zip(context_chunks, rerank_scores), key=lambda x: x[1], reverse=True)
+
+        # Embed all chunks
+        context_embeddings = []
+        for chunk in context_chunks:
+            emb = get_embedding(chunk)
+            context_embeddings.append(emb)
+
+        # Compute cosine similarity
+        scores = cosine_similarity([query_embedding], context_embeddings)[0]
+        ranked_results = sorted(zip(context_chunks, scores), key=lambda x: x[1], reverse=True)
 
         # Prepare context
-        num_chunks = min(len(ranked_results), 5)
-        context_text = "\n\n".join([r[0] for r in ranked_results[:num_chunks]])
+        context_text = "\n\n".join([r[0] for r in ranked_results[:5]])
 
         # Construct prompt
         prompt = f"""You are a legal assistant. Given the retrieved legal documents, provide a detailed answer.
