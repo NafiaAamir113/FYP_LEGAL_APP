@@ -73,40 +73,98 @@ if st.button("Generate Answer"):
         num_chunks = min(len(ranked_results), 5)
         context_text = "\n\n".join([r[0] for r in ranked_results[:num_chunks]])
 
+        # # Construct LLM prompt
+        # prompt = f"""You are a legal assistant. Given the retrieved legal documents, provide a detailed answer.
+
+        # Context:
+        # {context_text}
+
+        # Question: {query}
+
+        # Answer:"""
+
+        # # Query Together AI
+        # response = requests.post(
+        #     "https://api.together.xyz/v1/chat/completions",
+        #     headers={"Authorization": f"Bearer {TOGETHER_AI_API_KEY}", "Content-Type": "application/json"},
+        #     json={"model": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+        #           "messages": [{"role": "system", "content": "You are an expert in legal matters."},
+        #                        {"role": "user", "content": prompt}], "temperature": 0.2}
+        # )
+
+        # answer = response.json().get("choices", [{}])[0].get("message", {}).get("content", "No valid response from AI.")
+        # st.success("AI Response:")
+        # st.write(answer)
+
+        # # ✅ Download button
+        # report_text = f"LEGAL REPORT\n\nQuestion:\n{query}\n\nAnswer:\n{answer}"
+        # timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        # filename = f"Legal_Report_{timestamp}.txt"
+
+        # st.download_button(
+        #     label="📄 Download Legal Report",
+        #     data=report_text,
+        #     file_name=filename,
+        #     mime="text/plain"
+        # )
         # Construct LLM prompt
-        prompt = f"""You are a legal assistant. Given the retrieved legal documents, provide a detailed answer.
+prompt = f"""You are a legal assistant. Given the retrieved legal documents, provide a detailed answer.
 
-        Context:
-        {context_text}
+Context:
+{context_text}
 
-        Question: {query}
+Question: {query}
 
-        Answer:"""
+Answer:"""
 
-        # Query Together AI
-        response = requests.post(
-            "https://api.together.xyz/v1/chat/completions",
-            headers={"Authorization": f"Bearer {TOGETHER_AI_API_KEY}", "Content-Type": "application/json"},
-            json={"model": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
-                  "messages": [{"role": "system", "content": "You are an expert in legal matters."},
-                               {"role": "user", "content": prompt}], "temperature": 0.2}
-        )
+# Query Together AI
+response = requests.post(
+    "https://api.together.xyz/v1/chat/completions",
+    headers={
+        "Authorization": f"Bearer {TOGETHER_AI_API_KEY}",
+        "Content-Type": "application/json"
+    },
+    json={
+        "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+        "messages": [
+            {"role": "system", "content": "You are an expert in legal matters."},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.2
+    }
+)
 
-        answer = response.json().get("choices", [{}])[0].get("message", {}).get("content", "No valid response from AI.")
-        st.success("AI Response:")
-        st.write(answer)
+try:
+    data = response.json()
+except Exception as e:
+    st.error(f"Failed to parse API response JSON: {e}")
+    st.stop()
 
-        # ✅ Download button
-        report_text = f"LEGAL REPORT\n\nQuestion:\n{query}\n\nAnswer:\n{answer}"
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"Legal_Report_{timestamp}.txt"
+# Check if API returned an error message
+if response.status_code != 200:
+    st.error(f"API error {response.status_code}: {data.get('error', 'Unknown error')}")
+    st.stop()
 
-        st.download_button(
-            label="📄 Download Legal Report",
-            data=report_text,
-            file_name=filename,
-            mime="text/plain"
-        )
+# Safely get the answer content
+answer = data.get("choices", [{}])[0].get("message", {}).get("content")
+
+if not answer:
+    st.warning("No valid response from AI. Here's the raw API response:")
+    st.json(data)
+    st.stop()
+
+# Display AI answer
+st.success("AI Response:")
+st.write(answer)
+
+# Add a button to download the answer as a text file
+st.download_button(
+    label="Download Report",
+    data=answer,
+    file_name="legal_report.txt",
+    mime="text/plain"
+)
+
 
 # Footer with emoji
 st.markdown("<p style='text-align: center;'>🚀 Built with Streamlit</p>", unsafe_allow_html=True)
