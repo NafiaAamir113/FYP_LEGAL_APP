@@ -43,38 +43,35 @@ if st.button("Generate Answer"):
         st.warning("Please enter a legal question before generating an answer.")
         st.stop()
 
-    # Simple heuristic for query length
     if len(query.split()) < 4:
         st.warning("Your query seems incomplete. Please provide more details.")
         st.stop()
 
-    with st.spinner("Searching..."):
-        # Get embedding and convert to list for Pinecone
-        query_embedding = embedding_model.encode(query, normalize_embeddings=True).tolist()
+    with st.spinner("Searching legal documents..."):
+        try:
+            query_embedding = embedding_model.encode(query, normalize_embeddings=True).tolist()
+        except Exception as e:
+            st.error(f"Embedding generation failed: {e}")
+            st.stop()
 
-        # Query Pinecone with error handling
         try:
             search_results = index.query(vector=query_embedding, top_k=5, include_metadata=True)
         except Exception as e:
             st.error(f"Pinecone query failed: {e}")
             st.stop()
 
-        if not search_results or "matches" not in search_results or not search_results["matches"]:
-            st.warning("No relevant results found. Try rephrasing your query.")
+        matches = search_results.get("matches", [])
+        if not matches:
+            st.warning("No relevant documents found.")
             st.stop()
 
-        # Extract text chunks from results
-        context_chunks = [match["metadata"]["text"] for match in search_results["matches"]]
-
-        # Rerank results with CrossEncoder (query + chunk pairs)
+        # Extract and rerank context
+        context_chunks = [match["metadata"]["text"] for match in matches]
         rerank_scores = reranker.predict([(query, chunk) for chunk in context_chunks])
         ranked_results = sorted(zip(context_chunks, rerank_scores), key=lambda x: x[1], reverse=True)
+        context_text = "\n\n".join([chunk for chunk, _ in ranked_results[:5]])
 
-        # Take top 5 chunks
-        num_chunks = min(len(ranked_results), 5)
-        context_text = "\n\n".join([r[0] for r in ranked_results[:num_chunks]])
-
-        # Prepare prompt for LLM
+        # Construct prompt
         prompt = f"""You are a legal assistant. Given the retrieved legal documents, provide a detailed answer.
 
 Context:
@@ -84,7 +81,7 @@ Question: {query}
 
 Answer:"""
 
-        # Call Together AI API
+        # Query Together AI
         try:
             response = requests.post(
                 "https://api.together.xyz/v1/chat/completions",
@@ -93,7 +90,7 @@ Answer:"""
                     "Content-Type": "application/json"
                 },
                 json={
-                    "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+                    "model": "meta-llama/Llama-3-70B-Instruct",
                     "messages": [
                         {"role": "system", "content": "You are an expert in legal matters."},
                         {"role": "user", "content": prompt}
@@ -101,25 +98,23 @@ Answer:"""
                     "temperature": 0.2
                 }
             )
-            response.raise_for_status()
             answer = response.json().get("choices", [{}])[0].get("message", {}).get("content", "No valid response from AI.")
         except Exception as e:
-            st.error(f"AI request failed: {e}")
+            st.error(f"AI generation failed: {e}")
             st.stop()
 
-        # Show AI answer
         st.success("AI Response:")
         st.write(answer)
 
-        # Prepare report for download
+        # Report download
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        report_filename = f"Legal_Report_{timestamp}.txt"
+        filename = f"Legal_Report_{timestamp}.txt"
         report_content = f"LEGAL REPORT\n\nQuestion:\n{query}\n\nAnswer:\n{answer}"
 
         st.download_button(
             label="📄 Download Legal Report",
             data=report_content,
-            file_name=report_filename,
+            file_name=filename,
             mime="text/plain"
         )
 
