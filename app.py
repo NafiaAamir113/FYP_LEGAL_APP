@@ -73,41 +73,8 @@ if st.button("Generate Answer"):
         num_chunks = min(len(ranked_results), 5)
         context_text = "\n\n".join([r[0] for r in ranked_results[:num_chunks]])
 
-        # # Construct LLM prompt
-        # prompt = f"""You are a legal assistant. Given the retrieved legal documents, provide a detailed answer.
 
-        # Context:
-        # {context_text}
-
-        # Question: {query}
-
-        # Answer:"""
-
-        # # Query Together AI
-        # response = requests.post(
-        #     "https://api.together.xyz/v1/chat/completions",
-        #     headers={"Authorization": f"Bearer {TOGETHER_AI_API_KEY}", "Content-Type": "application/json"},
-        #     json={"model": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
-        #           "messages": [{"role": "system", "content": "You are an expert in legal matters."},
-        #                        {"role": "user", "content": prompt}], "temperature": 0.2}
-        # )
-
-        # answer = response.json().get("choices", [{}])[0].get("message", {}).get("content", "No valid response from AI.")
-        # st.success("AI Response:")
-        # st.write(answer)
-
-        # # ✅ Download button
-        # report_text = f"LEGAL REPORT\n\nQuestion:\n{query}\n\nAnswer:\n{answer}"
-        # timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        # filename = f"Legal_Report_{timestamp}.txt"
-
-        # st.download_button(
-        #     label="📄 Download Legal Report",
-        #     data=report_text,
-        #     file_name=filename,
-        #     mime="text/plain"
-        # )
-        # Construct LLM prompt
+       # Construct LLM prompt
 prompt = f"""You are a legal assistant. Given the retrieved legal documents, provide a detailed answer.
 
 Context:
@@ -164,6 +131,11 @@ st.download_button(
     file_name="legal_report.txt",
     mime="text/plain"
 )
+
+
+        
+
+
 
 
 # Footer with emoji
