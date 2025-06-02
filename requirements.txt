@@ -1,9 +1,10 @@
 streamlit
 requests
 pinecone
-transformers
-torch
 sentence-transformers
 scikit-learn
+torch
+transformers
+
 
 
