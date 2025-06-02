@@ -1,12 +1,10 @@
 import streamlit as st
 import requests
 import pinecone
-from transformers import AutoTokenizer, AutoModel
-import torch
+from sentence_transformers import SentenceTransformer, CrossEncoder
 import datetime
-from sklearn.metrics.pairwise import cosine_similarity
 
-# Streamlit setup
+# Streamlit page setup
 st.set_page_config(page_title="LEGAL ASSISTANT", layout="wide")
 
 # Load secrets
@@ -18,66 +16,65 @@ INDEX_NAME = "lawdata-index"
 pc = pinecone.Pinecone(api_key=PINECONE_API_KEY)
 
 # Check if index exists
-if INDEX_NAME not in [index["name"] for index in pc.list_indexes()]:
+existing_indexes = [index_info["name"] for index_info in pc.list_indexes()]
+if INDEX_NAME not in existing_indexes:
     st.error(f"Index '{INDEX_NAME}' not found.")
     st.stop()
 
+# Initialize Pinecone index
 index = pc.Index(INDEX_NAME)
 
-# Load embedding model and tokenizer
-tokenizer = AutoTokenizer.from_pretrained("hafsanaz0076/bge-finetuned")
-model = AutoModel.from_pretrained("hafsanaz0076/bge-finetuned")
-model = model.to("cpu")  # Ensure compatibility with Streamlit Cloud
+# Load embedding models
+embedding_model = SentenceTransformer("BAAI/bge-large-en")
+reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
 
-# Embedding function
-def get_embedding(text):
-    inputs = tokenizer(text, return_tensors="pt", padding=True, truncation=True)
-    with torch.no_grad():
-        outputs = model(**inputs)
-    embeddings = outputs.last_hidden_state.mean(dim=1)
-    normalized = torch.nn.functional.normalize(embeddings, p=2, dim=1)
-    return normalized[0].detach().cpu().numpy()  # Safe conversion
-
-# UI
+# Page Title
 st.title("⚖️ LEGAL ASSISTANT")
-st.markdown("AI-powered legal assistant that retrieves relevant documents and answers your legal questions.")
 
-# User input
+# Short App Description
+st.markdown("This AI-powered legal assistant retrieves relevant legal documents and provides accurate responses to your legal queries.")
+
+# Input field
 query = st.text_input("Enter your legal question:")
 
-# On submit
+# Generate Answer Button
 if st.button("Generate Answer"):
-    if not query or len(query.split()) < 4:
-        st.warning("Please enter a detailed legal question.")
+    if not query:
+        st.warning("Please enter a legal question before generating an answer.")
         st.stop()
 
-    with st.spinner("Searching legal database..."):
-        try:
-            query_embedding = get_embedding(query)
-        except Exception as e:
-            st.error(f"Failed to create embedding: {e}")
-            st.stop()
+    # Simple heuristic for query length
+    if len(query.split()) < 4:
+        st.warning("Your query seems incomplete. Please provide more details.")
+        st.stop()
 
+    with st.spinner("Searching..."):
+        # Get embedding and convert to list for Pinecone
+        query_embedding = embedding_model.encode(query, normalize_embeddings=True).tolist()
+
+        # Query Pinecone with error handling
         try:
-            results = index.query(vector=query_embedding.tolist(), top_k=8, include_metadata=True)
+            search_results = index.query(vector=query_embedding, top_k=5, include_metadata=True)
         except Exception as e:
             st.error(f"Pinecone query failed: {e}")
             st.stop()
 
-        matches = results.get("matches", [])
-        if not matches:
-            st.warning("No relevant documents found.")
+        if not search_results or "matches" not in search_results or not search_results["matches"]:
+            st.warning("No relevant results found. Try rephrasing your query.")
             st.stop()
 
-        chunks = [m["metadata"]["text"] for m in matches]
-        embeddings = [get_embedding(chunk) for chunk in chunks]
+        # Extract text chunks from results
+        context_chunks = [match["metadata"]["text"] for match in search_results["matches"]]
 
-        # Re-rank using cosine similarity
-        similarities = cosine_similarity([query_embedding], embeddings)[0]
-        reranked = sorted(zip(chunks, similarities), key=lambda x: x[1], reverse=True)
-        context_text = "\n\n".join([c[0] for c in reranked[:5]])
+        # Rerank results with CrossEncoder (query + chunk pairs)
+        rerank_scores = reranker.predict([(query, chunk) for chunk in context_chunks])
+        ranked_results = sorted(zip(context_chunks, rerank_scores), key=lambda x: x[1], reverse=True)
 
-        # Prompt to Together AI
+        # Take top 5 chunks
+        num_chunks = min(len(ranked_results), 5)
+        context_text = "\n\n".join([r[0] for r in ranked_results[:num_chunks]])
+
+        # Prepare prompt for LLM
         prompt = f"""You are a legal assistant. Given the retrieved legal documents, provide a detailed answer.
 
 Context:
@@ -87,6 +84,7 @@ Question: {query}
 
 Answer:"""
 
+        # Call Together AI API
         try:
             response = requests.post(
                 "https://api.together.xyz/v1/chat/completions",
@@ -95,7 +93,7 @@ Answer:"""
                     "Content-Type": "application/json"
                 },
                 json={
-                    "model": "meta-llama/Llama-3-70B-Instruct",
+                    "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
                     "messages": [
                         {"role": "system", "content": "You are an expert in legal matters."},
                         {"role": "user", "content": prompt}
@@ -103,18 +101,27 @@ Answer:"""
                     "temperature": 0.2
                 }
             )
+            response.raise_for_status()
             answer = response.json().get("choices", [{}])[0].get("message", {}).get("content", "No valid response from AI.")
         except Exception as e:
             st.error(f"AI request failed: {e}")
             st.stop()
 
+        # Show AI answer
         st.success("AI Response:")
         st.write(answer)
 
-        # Download report
+        # Prepare report for download
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"Legal_Report_{timestamp}.txt"
-        report = f"LEGAL REPORT\n\nQuestion:\n{query}\n\nAnswer:\n{answer}"
-        st.download_button("📄 Download Report", data=report, file_name=filename, mime="text/plain")
+        report_filename = f"Legal_Report_{timestamp}.txt"
+        report_content = f"LEGAL REPORT\n\nQuestion:\n{query}\n\nAnswer:\n{answer}"
 
+        st.download_button(
+            label="📄 Download Legal Report",
+            data=report_content,
+            file_name=report_filename,
+            mime="text/plain"
+        )
+
+# Footer
 st.markdown("<p style='text-align: center;'>🚀 Built with Streamlit</p>", unsafe_allow_html=True)
