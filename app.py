@@ -28,14 +28,14 @@ index = pc.Index(INDEX_NAME)
 tokenizer = AutoTokenizer.from_pretrained("hafsanaz0076/bge-finetuned")
 model = AutoModel.from_pretrained("hafsanaz0076/bge-finetuned")
 
-# Function to get embedding
 def get_embedding(text):
     inputs = tokenizer(text, return_tensors="pt", padding=True, truncation=True)
     with torch.no_grad():
         outputs = model(**inputs)
     embeddings = outputs.last_hidden_state.mean(dim=1)
     normalized = torch.nn.functional.normalize(embeddings, p=2, dim=1)
-    return normalized[0].cpu().numpy()
+    return normalized[0].numpy()  # .cpu() removed — already on CPU
+
 
 # UI
 st.title("⚖️ LEGAL ASSISTANT")
